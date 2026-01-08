@@ -49,9 +49,7 @@ const getSellerApprovalEmail = (sellerName, sellerEmail) => {
         </p>
         
         <div style="text-align: center; margin: 30px 0;">
-          <a href="${
-            process.env.FRONTEND_URL || "http://localhost:3000"
-          }/login" 
+          <a href="${process.env.FRONTEND_URL}/login" 
              style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                     color: white; 
                     padding: 14px 28px; 
@@ -93,7 +91,7 @@ const getSellerCreationEmail = (sellerName, sellerEmail, password) => {
         
         <p style="font-size: 16px; line-height: 1.6;">
           An admin has created a seller account for you on our platform.
-          Here are your login credentials:
+          Here are your login credentials: 
         </p>
         
         <div style="background-color: white; border: 1px solid #ddd; border-radius: 5px; padding: 20px; margin: 25px 0;">
@@ -108,9 +106,7 @@ const getSellerCreationEmail = (sellerName, sellerEmail, password) => {
         </div>
         
         <div style="text-align: center; margin: 30px 0;">
-          <a href="${
-            process.env.FRONTEND_URL || "http://localhost:3000"
-          }/login" 
+          <a href="${process.env.FRONTEND_URL}/login" 
              style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                     color: white; 
                     padding: 14px 28px; 
@@ -124,9 +120,7 @@ const getSellerCreationEmail = (sellerName, sellerEmail, password) => {
         
         <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #ddd;">
           <p style="color: #666; font-size: 14px;">
-            Need help? Contact our support team at ${
-              process.env.SUPPORT_EMAIL || "support@example.com"
-            }
+            Need help? Contact our support team at ${process.env.SUPPORT_EMAIL}
           </p>
         </div>
       </div>
@@ -175,9 +169,55 @@ const getForgotPasswordEmail = (userName, userEmail, otp) => {
   return { subject, html };
 };
 
+// 4. Signup Email Verification OTP
+const getSignupEmailVerification = (userEmail, otp, role) => {
+  const roleName = role === "seller" ? "Seller" : "User";
+  const subject = `Verify Your ${roleName} Account - OTP: ${otp}`;
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 20px;">
+        <h2 style="color: #333; margin-bottom: 5px;">${roleName} Account Verification</h2>
+        <p style="color: #666; font-size: 14px;">Use this OTP to complete your ${roleName.toLowerCase()} signup</p>
+      </div>
+      
+      <div style="background-color: #f8f9fa; padding: 25px; border-radius: 8px; border: 1px solid #e9ecef;">
+        <div style="text-align: center; margin: 25px 0;">
+          <div style="font-size: 40px; font-weight: bold; letter-spacing: 10px; color: #333; 
+                      background-color: white; padding: 20px; border-radius: 8px; 
+                      border: 2px solid #dee2e6; display: inline-block;">
+            ${otp}
+          </div>
+        </div>
+        
+        <div style="margin: 20px 0; padding: 15px; background-color: #e8f4f8; border-radius: 5px;">
+          <p style="margin: 0; font-size: 14px; color: #0c5460;">
+            <strong>Role:</strong> ${roleName}<br>
+            <strong>Email:</strong> ${userEmail}<br>
+            <strong>Expires in:</strong> 5 minutes
+          </p>
+        </div>
+        
+        <p style="font-size: 14px; color: #6c757d; margin-top: 20px; line-height: 1.5;">
+          Enter this OTP in the signup form to verify your email address and complete your ${roleName.toLowerCase()} registration.
+        </p>
+        
+        <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #dee2e6;">
+          <p style="font-size: 12px; color: #868e96; margin: 0;">
+            If you didn't request this OTP, please ignore this email.
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+
+  return { subject, html };
+};
+
 module.exports = {
   sendEmail,
   getSellerApprovalEmail,
   getSellerCreationEmail,
   getForgotPasswordEmail,
+  getSignupEmailVerification,
 };

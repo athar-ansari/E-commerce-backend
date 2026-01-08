@@ -4,7 +4,7 @@ const user = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true,
+      default: null,
     },
     profileImage: {
       url: { type: String, default: null },
@@ -17,7 +17,7 @@ const user = new mongoose.Schema(
     },
     password: {
       type: String,
-      required: true,
+      default: null,
     },
 
     address: [
@@ -35,7 +35,7 @@ const user = new mongoose.Schema(
           default: "",
         },
         pincode: {
-          type: String,
+          type: Number,
           default: "",
         },
         country: {
@@ -46,7 +46,7 @@ const user = new mongoose.Schema(
     ],
     mobile: {
       type: String,
-      required: true,
+      default: null,
     },
 
     otp: { type: Number, default: null },
@@ -58,15 +58,22 @@ const user = new mongoose.Schema(
     userType: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "UserType",
-      required: true,
+      default: null,
     },
 
     sellerInfo: {
-      storeName: { type: String, default: "" },
-      gstNumber: { type: String, default: "" },
-      businessType: { type: String, default: "" },
-      approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-      approvedAt: { type: Date },
+      type: {
+        storeName: { type: String, default: "" },
+        gstNumber: { type: String, default: "" },
+        businessType: { type: String, default: "" },
+      },
+      default: null, //
+      required: false,
+    },
+    sellerStatus: {
+      type: String,
+      enum: ["pending", "approved", "rejected", "suspended"],
+      default: null,
     },
     isActive: {
       type: Boolean,

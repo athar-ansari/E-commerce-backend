@@ -66,14 +66,13 @@ exports.createAdminUser = async (req, res) => {
     });
     await newAdmin.save();
 
-    // Remove password from response
-    const adminResponse = newAdmin.toObject();
-    delete adminResponse.password;
-
     console.log("Admin user created successfully");
     res.status(201).json({
       message: "Admin user created successfully",
-      user: adminResponse,
+      admin: {
+        name: newAdmin.name,
+        email: newAdmin.email,
+      },
     });
   } catch (error) {
     console.log(`Error creating Admin: ${error.message}`);
@@ -87,9 +86,6 @@ exports.createSellerByAdmin = async (req, res) => {
     const { name, email, password, address, mobile } = req.body;
 
     const sellerType = await UserType.findOne({ role: "seller" });
-    if (!sellerType) {
-      return res.status(400).json({ message: "Seller type not found" });
-    }
 
     let isExistUser = await User.findOne({ email: email });
     if (isExistUser) {
@@ -113,9 +109,9 @@ exports.createSellerByAdmin = async (req, res) => {
       address: address || [],
       mobile,
       userType: sellerType._id,
+      sellerStatus: "approved",
       isVerified: true, // Directly verified
       isActive: true, // Directly active
-      createdBy: req.user._id, // Track admin who created
       profileImage, // Use the object from file upload
     });
 
@@ -137,6 +133,7 @@ exports.createSellerByAdmin = async (req, res) => {
         id: newSeller._id,
         name: newSeller.name,
         email: newSeller.email,
+        sellerStatus: newSeller.sellerStatus,
         isVerified: newSeller.isVerified,
         isActive: newSeller.isActive,
         profileImage: newSeller.profileImage?.url || null,
@@ -173,11 +170,17 @@ exports.approveSeller = async (req, res) => {
         .json({ success: false, message: "Seller not found" });
     }
 
+    if (seller.isVerified && seller.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: "Seller is already approved",
+      });
+    }
+
     // Update seller status
     seller.isVerified = true;
     seller.isActive = true;
-    seller.sellerInfo.approvedBy = req.user._id;
-    seller.sellerInfo.approvedAt = new Date();
+    seller.sellerStatus = "approved";
 
     await seller.save();
 
@@ -199,6 +202,7 @@ exports.approveSeller = async (req, res) => {
         email: seller.email,
         isVerified: seller.isVerified,
         isActive: seller.isActive,
+        sellerStatus: seller.sellerStatus,
         profileImage: seller.profileImage?.url || null,
       },
     });
@@ -215,6 +219,7 @@ exports.getPendingSellers = async (req, res) => {
 
     const pendingSellers = await User.find({
       userType: sellerType._id,
+      sellerStatus: "pending",
       isVerified: false,
       isActive: false,
       isDeleted: null,
@@ -238,6 +243,119 @@ exports.getPendingSellers = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error fetching pending sellers",
+      error: error.message,
+    });
+  }
+};
+
+// -----------
+
+// Get dashboard statistics
+exports.getDashboardStats = async (req, res) => {
+  try {
+    const sellerType = await UserType.findOne({ role: "seller" });
+    const userType = await UserType.findOne({ role: "user" });
+    const adminType = await UserType.findOne({ role: "admin" });
+
+    // Count total users (regular users only, not sellers/admins)
+    const totalUsers = await User.countDocuments({
+      userType: userType?._id,
+      isDeleted: null,
+    });
+
+    // Count total sellers
+    const totalSellers = await User.countDocuments({
+      userType: sellerType?._id,
+      isDeleted: null,
+    });
+
+    // Count active sellers
+    const activeSellers = await User.countDocuments({
+      userType: sellerType?._id,
+      sellerStatus: "approved",
+      isActive: true,
+      isDeleted: null,
+    });
+
+    // Count pending sellers
+    const pendingSellers = await User.countDocuments({
+      userType: sellerType?._id,
+      sellerStatus: "pending",
+      isDeleted: null,
+    });
+
+    res.status(200).json({
+      success: true,
+      data: {
+        totalUsers: totalUsers || 0,
+        totalSellers: totalSellers || 0,
+        activeSellers: activeSellers || 0,
+        pendingSellers: pendingSellers || 0,
+      },
+    });
+  } catch (error) {
+    console.log(`Error fetching dashboard stats: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching dashboard stats",
+      error: error.message,
+    });
+  }
+};
+
+// Get all users (excluding admins)
+exports.getAllUsers = async (req, res) => {
+  try {
+    const userType = await UserType.findOne({ role: "user" });
+    const adminType = await UserType.findOne({ role: "admin" });
+
+    const users = await User.find({
+      userType: userType?._id,
+      isDeleted: null,
+    })
+      .select("name email mobile createdAt isActive")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      count: users.length,
+      users: users,
+    });
+  } catch (error) {
+    console.log(`Error fetching users: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching users",
+      error: error.message,
+    });
+  }
+};
+
+// Get all sellers
+exports.getAllSellers = async (req, res) => {
+  try {
+    const sellerType = await UserType.findOne({ role: "seller" });
+
+    const sellers = await User.find({
+      userType: sellerType?._id,
+      isDeleted: null,
+    })
+      .select("name email mobile sellerStatus isActive isVerified createdAt")
+      .populate("userType", "role")
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      count: sellers.length,
+      sellers: sellers,
+    });
+  } catch (error) {
+    console.log(`Error fetching sellers: ${error.message}`);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching sellers",
       error: error.message,
     });
   }

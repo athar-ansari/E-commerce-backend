@@ -7,6 +7,27 @@ const upload = require("../utils/upload");
 
 router.post("/register", createAdminUser);
 
+router.get(
+  "/dashboard-stats",
+  authMiddleware.authenticate,
+  authMiddleware.authorize("admin"),
+  adminController.getDashboardStats
+);
+
+router.get(
+  "/all-users",
+  authMiddleware.authenticate,
+  authMiddleware.authorize("admin"),
+  adminController.getAllUsers
+);
+
+router.get(
+  "/all-sellers",
+  authMiddleware.authenticate,
+  authMiddleware.authorize("admin"),
+  adminController.getAllSellers
+);
+
 // Protected admin routes
 router.post(
   "/create-seller",

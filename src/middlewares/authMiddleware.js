@@ -1,4 +1,4 @@
-const { verifyToken } = require('../utils/jwt');
+const { verifyToken } = require("../utils/jwt");
 const User = require("../models/userModel");
 
 // 1. Token verify karega (for all users)

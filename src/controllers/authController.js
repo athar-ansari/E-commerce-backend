@@ -16,10 +16,6 @@ exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ message: "Email and password required" });
-    }
-
     // Find user with userType populated
     const user = await User.findOne({ email }).populate("userType");
 
@@ -40,13 +36,6 @@ exports.login = async (req, res) => {
     if (user.userType.role === "seller" && !user.isVerified) {
       return res.status(403).json({
         message: "Your seller account is pending admin approval",
-      });
-    }
-
-    // Admin: Must be verified (though admin seed mein verified hi create hota hai)
-    if (userRole === "admin" && !user.isVerified) {
-      return res.status(403).json({
-        message: "Admin account not verified",
       });
     }
 
@@ -92,10 +81,6 @@ exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
 
-    if (!email) {
-      return res.status(400).json({ message: "Email is required" });
-    }
-
     const user = await User.findOne({ email });
 
     // Still return success even if user not found (security)
@@ -139,12 +124,6 @@ Verify OTP and Reset Password
 exports.resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
-
-    if (!email || !otp || !newPassword) {
-      return res.status(400).json({
-        message: "Email, OTP and new password required",
-      });
-    }
 
     const user = await User.findOne({ email });
 
