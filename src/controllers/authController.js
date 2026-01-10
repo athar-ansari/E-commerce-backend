@@ -18,47 +18,39 @@ exports.login = async (req, res) => {
 
     // Find user with userType populated
     const user = await User.findOne({ email }).populate("userType");
-
+    // console.log(`userRole: ${user.userType.role}`);
     if (!user) {
-      return res.status(400).json({ message: "Invalid email or password" });
+      return res.status(400).json({ message: "user not found" });
     }
 
-    // Check if account is active
-    if (!user.isActive) {
-      return res.status(403).json({ message: "Account is deactivated" });
+    // Check if user/seller signup but not verified email with OTP
+    if (!user.isVerified) {
+      return res
+        .status(403)
+        .json({ message: "Email not verified. Please verify your email." });
     }
-
-    // Different checks based on role
-    const userRole = user.userType.role;
-    console.log(`userRole: ${userRole}`);
 
     // Seller: Must be verified by admin
-    if (user.userType.role === "seller" && !user.isVerified) {
+    if (user.userType.role === "seller" && user.sellerStatus === "pending") {
       return res.status(403).json({
-        message: "Your seller account is pending admin approval",
+        message: "Your seller account is pending, wait for admin approval",
       });
     }
 
     // Check password
     const isPasswordMatch = await bcrypt.compare(password, user.password);
     if (!isPasswordMatch) {
-      return res.status(400).json({ message: "Invalid email or password" });
+      return res.status(400).json({ message: "Invalid password" });
     }
 
     // Create token with role info
     const token = generateToken({
       userId: user._id,
-      role: userRole,
+      role: user.userType.role,
       email: user.email,
       name: user.name,
     });
-    console.log(`token: ${token}`);
-
-    // Remove sensitive data from response
-    const userResponse = user.toObject();
-    delete userResponse.password;
-    delete userResponse.otp;
-    delete userResponse.otpExpiry;
+    // console.log(`token: ${token}`);
 
     res.status(200).json({
       message: "Login successful",
@@ -87,7 +79,7 @@ exports.forgotPassword = async (req, res) => {
     if (!user) {
       return res.status(200).json({
         success: true,
-        message: "If email exists, OTP will be sent",
+        message: "User email not found, Please Signup",
       });
     }
 
@@ -132,7 +124,7 @@ exports.resetPassword = async (req, res) => {
     }
 
     // Check OTP
-    if (user.otp !== parseInt(otp)) {
+    if (user.otp !== otp) {
       return res.status(400).json({ message: "Invalid OTP" });
     }
 

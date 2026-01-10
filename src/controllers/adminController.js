@@ -155,7 +155,7 @@ exports.createSellerByAdmin = async (req, res) => {
 // Admin approves pending sellers
 exports.approveSeller = async (req, res) => {
   try {
-    const { sellerId } = req.params;
+    const { sellerId, sellerStatus } = req.params;
 
     // Verify the user is actually a seller
     const sellerType = await UserType.findOne({ role: "seller" });
@@ -170,21 +170,19 @@ exports.approveSeller = async (req, res) => {
         .json({ success: false, message: "Seller not found" });
     }
 
-    if (seller.isVerified && seller.isActive) {
+    if (seller.sellerStatus === "approved") {
       return res.status(400).json({
         success: false,
         message: "Seller is already approved",
       });
     }
 
-    // Update seller status
-    seller.isVerified = true;
-    seller.isActive = true;
-    seller.sellerStatus = "approved";
+    // Admin can only set to 'approved' or 'rejected'
+    seller.sellerStatus = sellerStatus;
 
     await seller.save();
 
-    //  SEND APPROVAL EMAIL
+    //  SEND APPROVAL EMAIL - TODO : REJECTION EMAIL, add sellerStatus in mail
     const emailTemplate = getSellerApprovalEmail(seller.name, seller.email);
     const emailResult = await sendEmail(
       seller.email,
@@ -220,9 +218,6 @@ exports.getPendingSellers = async (req, res) => {
     const pendingSellers = await User.find({
       userType: sellerType._id,
       sellerStatus: "pending",
-      isVerified: false,
-      isActive: false,
-      isDeleted: null,
     })
       .populate({
         path: "userType",

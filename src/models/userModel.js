@@ -49,7 +49,7 @@ const user = new mongoose.Schema(
       default: null,
     },
 
-    otp: { type: Number, default: null },
+    otp: { type: String, default: null },
     otpVerified: {
       type: Boolean,
       default: true,

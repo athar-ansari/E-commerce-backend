@@ -1,119 +1,44 @@
-const UserType = require("../models/UserTypeModel");
 const User = require("../models/userModel");
-const bcrypt = require("bcrypt");
-const cloudinary = require("../utils/cloudinary");
+const UserType = require("../models/UserTypeModel");
 const {
-  sendEmail,
   getSignupEmailVerification,
+  sendEmail,
 } = require("../services/emailService");
+const bcrypt = require("bcrypt");
 
-// Simple OTP-based signup
-exports.signup = async (req, res) => {
+// Signup Controller
+const signup = async (req, res) => {
   try {
-    const {
-      name,
-      email,
-      password,
-      address,
-      mobile,
-      otp,
-      role = "user",
-    } = req.body;
+    const { name, email, password, mobile, role = "user" } = req.body;
 
-    // Check if email already registered
+    // Check if user already exists
     const existingUser = await User.findOne({ email });
-    if (existingUser && existingUser.isVerified) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already registered",
-      });
-    }
 
-    // If OTP not provided, send OTP
-    if (!otp) {
-      // Generate OTP
-      const generatedOtp = Math.floor(100000 + Math.random() * 900000);
-
-      // Send OTP email
-      const emailTemplate = getSignupEmailVerification(
-        email,
-        generatedOtp,
-        role
-      );
-      await sendEmail(email, emailTemplate.subject, emailTemplate.html);
-
-      // Create/update user with OTP (not verified)
-      if (existingUser) {
-        existingUser.otp = generatedOtp;
-        existingUser.otpExpiry = Date.now() + 5 * 60 * 1000;
-        existingUser.otpVerified = false;
-        await existingUser.save();
-      } else {
-        const tempUser = new User({
-          email,
-          otp: generatedOtp,
-          otpExpiry: Date.now() + 5 * 60 * 1000,
-          otpVerified: false,
-        });
-        await tempUser.save();
-      }
-
-      return res.status(200).json({
-        success: true,
-        message: "OTP sent to email",
-        requiresOtp: true,
-      });
-    }
-
-    // OTP provided, verify it
     if (existingUser) {
-      // Check OTP
-      if (existingUser.otp !== parseInt(otp)) {
+      if (existingUser.isVerified) {
         return res.status(400).json({
           success: false,
-          message: "Invalid OTP",
+          message: "Email already registered, Please login",
         });
-      }
-
-      // Check expiry
-      if (Date.now() > existingUser.otpExpiry) {
+      } else {
         return res.status(400).json({
           success: false,
-          message: "OTP expired",
+          message:
+            "Email already registered but not verified . Please verify your email.",
+          redirectTo: "/resend-otp", // Frontend can use this
         });
       }
-    } else {
-      return res.status(400).json({
-        success: false,
-        message: "Please request OTP first",
-      });
-    }
-
-    // Validate role
-    const validRoles = ["user", "seller"];
-    if (!validRoles.includes(role)) {
-      return res.status(400).json({
-        success: false,
-        message: `Invalid role. Use: ${validRoles.join(", ")}`,
-      });
-    }
-
-    // Get userType
-    const userType = await UserType.findOne({ role });
-    if (!userType) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid role configuration",
-      });
     }
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Generate OTP
+    const otp = Math.floor(100000 + Math.random() * 900000);
+    const otpExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
     // Prepare profile image
     let profileImage = null;
-
-    // Check if file exists in request
     if (req.file) {
       profileImage = {
         url: req.file.path,
@@ -121,108 +46,250 @@ exports.signup = async (req, res) => {
       };
     }
 
-    // Update existing user with all data
-    existingUser.name = name;
-    existingUser.password = hashedPassword;
-    existingUser.address = [
-      {
-        street: "",
-        city: "",
-        state: "",
-        pincode: "",
-        country: "India",
-      },
-    ];
-    existingUser.mobile = mobile;
-    existingUser.userType = userType._id;
-    existingUser.profileImage = profileImage;
+    // Parse address fields from request body
+    const { street, city, state, pincode, country } = req.body;
 
-    // Clear OTP fields
-    existingUser.otp = null;
-    existingUser.otpExpiry = null;
-    existingUser.otpVerified = true;
+    let addressArray = [];
 
-    // Set role-based status
-    if (role === "user") {
-      existingUser.isActive = true;
-      existingUser.isVerified = true;
-      existingUser.sellerInfo = null;
-    } else if (role === "seller") {
-      existingUser.isActive = false;
-      existingUser.isVerified = false;
-      existingUser.sellerStatus = "pending";
-      existingUser.sellerInfo = {
-        storeName: "",
-        gstNumber: "",
-        businessType: "",
-      };
+    // Only create address if at least one field is provided
+    if (street || city || state || pincode) {
+      addressArray = [
+        {
+          street: street,
+          city: city,
+          state: state,
+          pincode: pincode,
+          country: country,
+        },
+      ];
     }
 
-    // Save to DB (only after OTP verification)
-    await existingUser.save();
+    // Get UserType based on role
+    let userType = await UserType.findOne({ role: role.toLowerCase() });
 
-    // Prepare response
-    const userResponse = existingUser.toObject();
-    delete userResponse.password;
+    if (!userType) {
+      userType = await UserType.findOne({ role: "user" });
+    }
+
+    // Prepare user data
+    const userData = {
+      name,
+      email,
+      password: hashedPassword,
+      mobile,
+      profileImage,
+      address: addressArray,
+      otp,
+      otpExpiry,
+      otpVerified: false,
+      userType: userType._id,
+    };
+
+    // Add seller-specific fields if role is seller
+    if (role.toLowerCase() === "seller") {
+      const { storeName, gstNumber, businessType } = req.body;
+
+      userData.sellerInfo = {
+        storeName: storeName,
+        gstNumber: gstNumber,
+        businessType: businessType,
+      };
+      userData.sellerStatus = "pending";
+    } else {
+      userData.sellerInfo = null;
+      userData.sellerStatus = null;
+    }
+
+    // Create new user
+    const newUser = new User(userData);
+    await newUser.save();
+
+    // Send OTP email
+    const emailTemplate = getSignupEmailVerification(email, otp, role);
+    const emailResult = await sendEmail(
+      email,
+      emailTemplate.subject,
+      emailTemplate.html
+    );
+
+    // Return success response
+    const responseUser = {
+      _id: newUser._id,
+      name: newUser.name,
+      email: newUser.email,
+      role: role,
+      isVerified: newUser.isVerified,
+      ...(role === "seller" && { sellerStatus: newUser.sellerStatus }),
+      address: newUser.address,
+    };
 
     res.status(201).json({
       success: true,
-      message:
-        role === "seller"
-          ? "Seller account created. Awaiting admin approval."
-          : "Account created successfully",
-      user: userResponse,
+      message: "Signup successful! Please verify your email with OTP.",
+      user: responseUser,
+      emailSent: emailResult.success,
+      note: "OTP will expire in 5 minutes",
     });
   } catch (error) {
     console.error("Signup error:", error);
-
-    // Cleanup image if error
-    if (req.file?.filename) {
-      await cloudinary.uploader.destroy(req.file.filename);
-    }
-
     res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Signup failed",
+      error: error.message,
     });
   }
 };
 
-// Resend OTP
-exports.resendOtp = async (req, res) => {
+// OTP Verification (same as before)
+const verifyOtp = async (req, res) => {
   try {
-    const { email, role = "user" } = req.body;
+    const { email, otp } = req.body;
 
     const user = await User.findOne({ email });
+
     if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (user.otpVerified) {
       return res.status(400).json({
         success: false,
-        message: "No signup found",
+        message: "Email already verified. Please login.",
+      });
+    }
+
+    if (user.otp !== parseInt(otp)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP",
+      });
+    }
+
+    if (user.otpExpiry < new Date()) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP has expired. Please request a new one.",
+      });
+    }
+
+    // Update verification status
+    user.otpVerified = true;
+    user.isVerified = true;
+    user.otp = null;
+    user.otpExpiry = null;
+
+    await user.save();
+
+    // Get role for response
+    let role = "user";
+    if (user.userType) {
+      const userTypeDoc = await UserType.findById(user.userType);
+      role = userTypeDoc ? userTypeDoc.role : "user";
+    }
+
+    const responseUser = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: role,
+      isVerified: user.isVerified,
+      isActive: user.isActive,
+      address: user.address,
+      ...(role === "seller" && {
+        sellerStatus: user.sellerStatus,
+        storeName: user.sellerInfo?.storeName,
+      }),
+    };
+
+    res.status(200).json({
+      success: true,
+      message: "Email verified successfully!",
+      user: responseUser,
+    });
+  } catch (error) {
+    console.error("OTP verification error:", error);
+    res.status(500).json({
+      success: false,
+      message: "OTP verification failed",
+      error: error.message,
+    });
+  }
+};
+
+// Resend OTP (same as before)
+const resendOtp = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    if (user.isVerified && user.otpVerified) {
+      return res.status(400).json({
+        success: false,
+        message: "Email already verified. Please login.",
       });
     }
 
     // Generate new OTP
     const newOtp = Math.floor(100000 + Math.random() * 900000);
+    const otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
+
+    user.otp = newOtp;
+    user.otpExpiry = otpExpiry;
+    user.otpVerified = false;
+
+    await user.save();
+
+    // Get user role for email
+    let role = "user";
+    if (user.userType) {
+      const userTypeDoc = await UserType.findById(user.userType);
+      role = userTypeDoc ? userTypeDoc.role : "user";
+    }
 
     // Send email
     const emailTemplate = getSignupEmailVerification(email, newOtp, role);
-    await sendEmail(email, emailTemplate.subject, emailTemplate.html);
+    const emailResult = await sendEmail(
+      email,
+      emailTemplate.subject,
+      emailTemplate.html
+    );
 
-    // Update user
-    user.otp = newOtp;
-    user.otpExpiry = Date.now() + 5 * 60 * 1000;
-    user.otpVerified = false;
-    await user.save();
-
-    res.json({
+    res.status(200).json({
       success: true,
-      message: "OTP resent",
+      message: "New OTP sent successfully!",
+      emailSent: emailResult.success,
+      note: "OTP will expire in 5 minutes",
     });
   } catch (error) {
-    console.error("Resend error:", error);
+    console.error("Resend OTP error:", error);
     res.status(500).json({
       success: false,
       message: "Failed to resend OTP",
+      error: error.message,
     });
   }
+};
+
+module.exports = {
+  signup,
+  verifyOtp,
+  resendOtp,
 };
