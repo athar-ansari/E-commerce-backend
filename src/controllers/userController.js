@@ -1,12 +1,18 @@
 const User = require("../models/userModel");
 const UserType = require("../models/UserTypeModel");
-const {
-  getSignupEmailVerification,
-  sendEmail,
-} = require("../services/emailService");
 const bcrypt = require("bcrypt");
+const {
+  generateSendAndSaveOTP,
+  verifyOTP,
+  clearOTP,
+} = require("../services/otpService");
 
-// Signup Controller
+/**  
+===============================================
+ Signup Controller (With OTP verification) 
+=============================================== 
+ */
+
 const signup = async (req, res) => {
   try {
     const { name, email, password, mobile, role = "user" } = req.body;
@@ -24,18 +30,14 @@ const signup = async (req, res) => {
         return res.status(400).json({
           success: false,
           message:
-            "Email already registered but not verified . Please verify your email.",
-          redirectTo: "/resend-otp", // Frontend can use this
+            "Email already registered but not verified. Please verify your email.",
+          redirectTo: "/resend-otp",
         });
       }
     }
 
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000);
-    const otpExpiry = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
     // Prepare profile image
     let profileImage = null;
@@ -79,9 +81,9 @@ const signup = async (req, res) => {
       mobile,
       profileImage,
       address: addressArray,
-      otp,
-      otpExpiry,
       otpVerified: false,
+      isVerified: false,
+      isActive: true,
       userType: userType._id,
     };
 
@@ -104,13 +106,15 @@ const signup = async (req, res) => {
     const newUser = new User(userData);
     await newUser.save();
 
-    // Send OTP email
-    const emailTemplate = getSignupEmailVerification(email, otp, role);
-    const emailResult = await sendEmail(
-      email,
-      emailTemplate.subject,
-      emailTemplate.html
-    );
+    //  Using otpService to generate, send and save OTP
+    const otpResult = await generateSendAndSaveOTP(newUser, "signup", { role });
+
+    if (!otpResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: "User created but failed to send OTP",
+      });
+    }
 
     // Return success response
     const responseUser = {
@@ -119,6 +123,7 @@ const signup = async (req, res) => {
       email: newUser.email,
       role: role,
       isVerified: newUser.isVerified,
+      isActive: newUser.isActive,
       ...(role === "seller" && { sellerStatus: newUser.sellerStatus }),
       address: newUser.address,
     };
@@ -127,7 +132,7 @@ const signup = async (req, res) => {
       success: true,
       message: "Signup successful! Please verify your email with OTP.",
       user: responseUser,
-      emailSent: emailResult.success,
+      emailSent: otpResult.success,
       note: "OTP will expire in 5 minutes",
     });
   } catch (error) {
@@ -135,12 +140,17 @@ const signup = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Signup failed",
-      error: error.message,
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
 
-// OTP Verification (same as before)
+/**  
+===============================================
+ OTP Verification (using otpService)
+=============================================== 
+ */
+
 const verifyOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -154,32 +164,21 @@ const verifyOtp = async (req, res) => {
       });
     }
 
-    if (user.otpVerified) {
+    //   Using otpService for verification
+    const verificationResult = verifyOTP(user, otp);
+
+    if (!verificationResult.success) {
       return res.status(400).json({
         success: false,
-        message: "Email already verified. Please login.",
+        message: verificationResult.message,
       });
     }
 
-    if (user.otp !== parseInt(otp)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid OTP",
-      });
-    }
-
-    if (user.otpExpiry < new Date()) {
-      return res.status(400).json({
-        success: false,
-        message: "OTP has expired. Please request a new one.",
-      });
-    }
+    //  Clear OTP using service function
+    await clearOTP(user);
 
     // Update verification status
-    user.otpVerified = true;
     user.isVerified = true;
-    user.otp = null;
-    user.otpExpiry = null;
 
     await user.save();
 
@@ -214,12 +213,17 @@ const verifyOtp = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "OTP verification failed",
-      error: error.message,
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
 
-// Resend OTP (same as before)
+/**  
+===============================================
+ Resend OTP (using otpService)
+=============================================== 
+ */
+
 const resendOtp = async (req, res) => {
   try {
     const { email } = req.body;
@@ -247,35 +251,23 @@ const resendOtp = async (req, res) => {
       });
     }
 
-    // Generate new OTP
-    const newOtp = Math.floor(100000 + Math.random() * 900000);
-    const otpExpiry = new Date(Date.now() + 5 * 60 * 1000);
+    //  Using otpService to resend OTP
+    const otpResult = await generateSendAndSaveOTP(user, "signup", {
+      role: user.userType?.role || "user",
+    });
 
-    user.otp = newOtp;
-    user.otpExpiry = otpExpiry;
-    user.otpVerified = false;
-
-    await user.save();
-
-    // Get user role for email
-    let role = "user";
-    if (user.userType) {
-      const userTypeDoc = await UserType.findById(user.userType);
-      role = userTypeDoc ? userTypeDoc.role : "user";
+    if (!otpResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to resend OTP",
+        error: otpResult.error,
+      });
     }
-
-    // Send email
-    const emailTemplate = getSignupEmailVerification(email, newOtp, role);
-    const emailResult = await sendEmail(
-      email,
-      emailTemplate.subject,
-      emailTemplate.html
-    );
 
     res.status(200).json({
       success: true,
       message: "New OTP sent successfully!",
-      emailSent: emailResult.success,
+      emailSent: otpResult.success,
       note: "OTP will expire in 5 minutes",
     });
   } catch (error) {
@@ -283,7 +275,7 @@ const resendOtp = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to resend OTP",
-      error: error.message,
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };

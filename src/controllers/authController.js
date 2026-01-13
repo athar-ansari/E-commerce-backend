@@ -1,10 +1,12 @@
 const User = require("../models/userModel");
 const bcrypt = require("bcrypt");
 const { generateToken } = require("../utils/jwt");
+
 const {
-  sendEmail,
-  getForgotPasswordEmail,
-} = require("../services/emailService");
+  generateSendAndSaveOTP,
+  verifyOTP,
+  clearOTP,
+} = require("../services/otpService");
 
 /**  
 ===============================================
@@ -21,6 +23,14 @@ exports.login = async (req, res) => {
     // console.log(`userRole: ${user.userType.role}`);
     if (!user) {
       return res.status(400).json({ message: "user not found" });
+    }
+
+    //  Check if user is active
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is deactivated. Please contact support.",
+      });
     }
 
     // Check if user/seller signup but not verified email with OTP
@@ -52,14 +62,32 @@ exports.login = async (req, res) => {
     });
     // console.log(`token: ${token}`);
 
+    // Prepare user response
+    const userResponse = {
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      role: user.userType.role,
+      isVerified: user.isVerified,
+      isActive: user.isActive,
+      ...(user.userType.role === "seller" && {
+        sellerStatus: user.sellerStatus,
+        storeName: user.sellerInfo?.storeName,
+      }),
+    };
+
     res.status(200).json({
+      success: true,
       message: "Login successful",
       token,
       user: userResponse,
     });
   } catch (error) {
     console.error("Login error:", error);
-    res.status(500).json({ message: "Internal server error" });
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
   }
 };
 
@@ -83,16 +111,25 @@ exports.forgotPassword = async (req, res) => {
       });
     }
 
-    // Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000);
-    user.otp = otp;
-    user.otpExpiry = Date.now() + 5 * 60 * 1000; // 5 minutes
-    user.otpVerified = false;
-    await user.save();
+    //  Check if user is active (optional - depends on requirement)
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account is deactivated. Please contact support.",
+      });
+    }
 
-    //   SEND OTP EMAIL
-    const emailTemplate = getForgotPasswordEmail(user.name, email, otp);
-    await sendEmail(email, emailTemplate.subject, emailTemplate.html);
+    //  Using new otpService - Single line for generate, send and save
+    const otpResult = await generateSendAndSaveOTP(user, "forgotPassword", {
+      userName: user.name,
+    });
+
+    if (!otpResult.success) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send OTP. Please try again.",
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -101,9 +138,19 @@ exports.forgotPassword = async (req, res) => {
     });
   } catch (error) {
     console.error("Forgot password error:", error);
+
+    // Check if error is from OTP service
+    if (error.message.includes("Invalid OTP email type")) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid request type",
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: "Failed to process request",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -113,6 +160,7 @@ exports.forgotPassword = async (req, res) => {
 Verify OTP and Reset Password
 =============================================== 
  */
+
 exports.resetPassword = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
@@ -123,21 +171,21 @@ exports.resetPassword = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Check OTP
-    if (user.otp !== otp) {
-      return res.status(400).json({ message: "Invalid OTP" });
-    }
+    //  Using new otpService for verification
+    const verificationResult = verifyOTP(user, otp);
 
-    if (user.otpExpiry < Date.now()) {
-      return res.status(400).json({ message: "OTP expired" });
+    if (!verificationResult.success) {
+      return res.status(400).json({
+        success: false,
+        message: verificationResult.message,
+      });
     }
 
     // Update password
     user.password = await bcrypt.hash(newPassword, 10);
-    user.otp = null;
-    user.otpExpiry = null;
-    user.otpVerified = true;
-    await user.save();
+
+    //  Clear OTP using service function
+    await clearOTP(user);
 
     res.status(200).json({
       success: true,
@@ -148,6 +196,7 @@ exports.resetPassword = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to reset password",
+      // error: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }
 };

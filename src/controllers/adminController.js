@@ -1,12 +1,13 @@
 const UserType = require("../models/UserTypeModel");
 const User = require("../models/userModel");
 const bcrypt = require("bcrypt");
-const cloudinary = require("../utils/cloudinary");
+const cloudinary = require("../config/cloudinaryConfig");
 const {
   sendEmail,
   getSellerApprovalEmail,
   getSellerCreationEmail,
 } = require("../services/emailService");
+const Category = require("../models/categoryModel");
 
 exports.createAdminUser = async (req, res) => {
   try {
@@ -242,6 +243,62 @@ exports.getPendingSellers = async (req, res) => {
     });
   }
 };
+
+// Add new category
+exports.addCategory = async (req, res) => {
+  try {
+    const { name } = req.body;
+
+    const existingCategory = await Category.findOne({
+      name: { $regex: new RegExp(`^${name}$`, "i") },
+    });
+    if (existingCategory) {
+      return res.status(400).json({ message: "Category already exists" });
+    }
+
+    const category = new Category({
+      name,
+      createdBy: req.user._id,
+    });
+
+    await category.save();
+
+    res.status(201).json({
+      success: true,
+      message: "Category added successfully",
+      category,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to add category",
+      error: error.message,
+    });
+  }
+};
+
+// check this later
+// exports.getAllCategories = async (req, res) => {
+//   try {
+//     const categories = await Category.find({ isActive: true })
+//       .select("name _id")
+//       .sort({ name: 1 });
+
+//     res.status(200).json({
+//       success: true,
+//       count: categories.length,
+//       categories,
+//     });
+
+//   } catch (error) {
+//     console.error("Get categories error:", error);
+//     res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch categories",
+//       error: error.message,
+//     });
+//   }
+// };
 
 // -----------
 
